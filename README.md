@@ -1,122 +1,34 @@
-<div align="center">
+# Glasslight 洱海改版
 
-<img src="icon.png" alt="Glasslight icon" width="128" height="128">
+面向一加平板 2 Pro、Arch Linux ARM 与 GNOME Shell 51 的应用启动台，基于 [eliotBenitez/glasslight](https://github.com/eliotBenitez/glasslight) `0c3515ef2ed956c765b5ab14832a0df596445dbc`，改版版本为 `22-erhai.3`。
 
-# Glasslight
+## 操作
 
-### A fast, keyboard-first launcher with native glass for GNOME Shell 50
+- `Super+A` 或 Dock 的应用按钮打开应用目录，`Ctrl+Alt+Space` 打开搜索。
+- 长按应用约 200 毫秒后拖动，创建文件夹或移动到已有文件夹。
+- 使用“整理”、`F2`、移动、全选与保存名称操作管理应用；文件夹保存在本机 GSettings 中。
+- `Esc` 逐层取消移动、清除搜索、退出整理、返回主页和关闭启动台。支持键盘焦点与中文输入法。
+- 上游文件搜索、计算、系统操作与剪贴板功能保留；剪贴板历史默认关闭。输入搜索文字不会发送网络请求，选择网页搜索结果才会打开浏览器。
 
-[![CI](https://github.com/eliotBenitez/glasslight/actions/workflows/ci.yml/badge.svg)](https://github.com/eliotBenitez/glasslight/actions/workflows/ci.yml)
-![GNOME Shell 50](https://img.shields.io/badge/GNOME%20Shell-50-4A86CF?logo=gnome&logoColor=white)
-![GJS](https://img.shields.io/badge/GJS-ES%20modules-F7DF1E?logo=javascript&logoColor=111)
+## 加载玻璃外观
 
-**English** · [Русский](README.ru.md)
+依赖 [Lintel 洱海改版](https://github.com/ErikaAlk/lintel)、Blur my Shell 77 和 `erhai-motion@erhai.local`。完整安装、启用与停用命令见 [Arch 可选外观](https://github.com/ErikaAlk/onepluspad-2pro-Arch/blob/main/docs/APPEARANCE.zh-CN.md)。
 
-Press `Alt+Space` and start typing. Launch apps, open files, do quick math,
-run handy actions, and paste from your clipboard history — all without touching
-the mouse.
+精调材质随 Arch 仓库 `arch/appearance/` 一起保存：饱和度 `1.05`、折射模糊半径 `14`、色散 `0.03`、高光强度 `0.10`、噪点 `0.025`、圆角平滑度 `0.6`，并保留完整着色器和动态明暗采样实现。启动台沿用实时 GPU 背景捕获、折射、模糊与连续圆角；文字和图标独立绘制。屏幕键盘、可用显示区域与 GNOME 减少动态设置继续生效。
 
-![Glasslight application catalogue](assets/screenshots/glasslight-apps.png)
+加载顺序为 Blur my Shell → Lintel → erhai-motion → Glasslight。新装和更新 JavaScript 后需要退出 GNOME 并重新登录。
 
-</div>
+## 打包与检查
 
-## Why you'll like it
-
-- **One shortcut for everything.** `Alt+Space` opens a compact bar that grows
-  into results only when you need them.
-- **Beautiful native glass.** Real GPU blur of your live desktop, not a fake
-  gradient — and it stays crisp in light and dark themes.
-- **Useful out of the box.** A calculator, timers, password generator, media
-  controls and more are built in. No plugins to hunt for.
-- **Private by default.** Your searches and clipboard history stay on your
-  device. Nothing is sent while you type.
-
-## A peek
-
-| Compact launcher | Built-in calculator |
-| --- | --- |
-| ![Glasslight compact launcher](assets/screenshots/glasslight-home.png) | ![Glasslight calculator](assets/screenshots/glasslight-calculator.png) |
-
-## Getting started
-
-Install from source:
+需要 Bash、Python、gettext、glib2、zip 与 unzip。
 
 ```sh
-git clone https://github.com/eliotBenitez/glasslight.git
-cd glasslight
-make package
-gnome-extensions install --force dist/Glasslight-GNOME-50.shell-extension.zip
+bash package-erhai.sh "$PWD/dist"
+gjs -m tests/folders.test.js
 ```
 
-Log out of GNOME and sign back in (this refreshes cached modules), then turn it
-on:
+输出 `dist/glasslight-erhai.shell-extension.zip`，脚本严格编译 schema 与翻译，并核对 ZIP 中的模块和资源。
 
-```sh
-gnome-extensions enable glasslight
-```
+本机此前已验证 1280×720 交互、日常 GNOME 会话、文件夹持久保存、真实中文输入法候选与触控提交。屏幕阅读器、系统字体缩放和全部主题组合尚未验证。本次源码发布保持既有界面和材质实现，未重新操作平板。
 
-That's it — press `Alt+Space` and go.
-
-> **Shortcut taken?** If GNOME's window menu already uses `Alt+Space`, free it
-> with `gsettings set org.gnome.desktop.wm.keybindings activate-window-menu "[]"`.
-
-## The essentials
-
-Just start typing to search everywhere, then use the keyboard for the rest:
-
-| Shortcut | Action |
-| --- | --- |
-| `Alt+Space` | Open or close Glasslight |
-| `Ctrl+0` | Return to global search |
-| `Ctrl+1` … `Ctrl+4` | Apps · Files · Actions · Clipboard |
-| `↑` / `↓` | Select a result |
-| `←` / `→` | Navigate the application grid |
-| `Alt+←` / `Alt+→` | Change application category |
-| `Tab` / `Shift+Tab` | Move between controls |
-| `Space` | Preview the selected file or image |
-| `Enter` | Open, run, or copy the selection |
-| `Esc` | Cancel the action or close Glasslight |
-
-Search GNOME Settings panels in global search or **Actions** (`Ctrl+3`): try
-“Wi-Fi”, “sound”, or a setting's name in your system language. Click a result
-or press `Enter` to open Settings directly at that section, including nested
-pages such as Users. Results use installed GNOME panel desktop entries and
-their localized names, descriptions, and keywords; unavailable entries are not
-listed. Searching stays local and opens nothing until you select a result.
-
-Want to tweak the theme, blur, clipboard history, or shortcut? Preferences can
-also make `Super+A`, the Show Apps button, and a second `Super` press open
-Glasslight's app catalogue instead of the GNOME app grid. With this option on,
-an upward Overview swipe stops at the window view instead of opening the app grid.
-
-```sh
-gnome-extensions prefs glasslight
-```
-
-## Good to know
-
-- Clipboard history lives in memory only and clears when your session ends.
-- A web search opens only when you pick the web result — never while typing.
-  Choose DuckDuckGo (default), Google, Bing, Yandex, Brave Search, Startpage,
-  Ecosia, or your own URL template in preferences.
-- Passwords are generated from `/dev/urandom`.
-- Glasslight targets GNOME Shell **50** only, for now.
-
-## License
-
-Glasslight is free software: you can redistribute it and/or modify it under the
-terms of the [GNU General Public License v3.0](LICENSE).
-
-## Contributing
-
-Bug reports and pull requests are welcome. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for the architecture, build commands, and
-the manual-test checklist.
-
-## Design note
-
-Glasslight is an independent GNOME extension inspired by contemporary
-translucent interfaces. It ships no Apple assets or proprietary technology; the
-glass is built with GNOME Shell's own
-[`Shell.BlurEffect`](https://gnome.pages.gitlab.gnome.org/gnome-shell/shell/class.BlurEffect.html)
-and a custom rounded mask.
+保留上游版权与 [GPL-3.0 许可证](LICENSE)。`kimpanel-shell-entry.patch` 与 `kimpanel-candidate-touch.patch` 用于本项目的 kimpanel 输入法配置；使用该输入法时按配套说明应用。

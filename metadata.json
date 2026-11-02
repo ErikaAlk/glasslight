@@ -1,9 +1,11 @@
 {
   "uuid": "glasslight",
   "name": "Glasslight",
-  "description": "A fast glass-style launcher for applications, files, actions, and calculations.",
-  "shell-version": ["50"],
+  "url": "https://github.com/ErikaAlk/glasslight",
+  "description": "支持应用文件夹与实时液态玻璃的启动台。",
+  "shell-version": ["51"],
   "version": 22,
+  "version-name": "22-erhai.3",
   "settings-schema": "org.gnome.shell.extensions.glasslight",
   "gettext-domain": "glasslight"
 }

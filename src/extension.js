@@ -13,6 +13,8 @@ import * as AppFavorites from 'resource:///org/gnome/shell/ui/appFavorites.js';
 import {ControlsState} from 'resource:///org/gnome/shell/ui/overviewControls.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {GlassSurface} from './ui/glass.js';
+import {FolderLibrary} from './ui/folders.js';
+import {animate} from './ui/motion.js';
 import {FILE_TYPES, localImageFiles, selectionBytes, localImageBytes} from './core/clipboardFiles.js';
 import {CATEGORIES, categoryIds, catalogue} from './search/appCatalog.js';
 import {MODES, SKIP, IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_CLIPBOARD_BYTES, SCROLL_INDICATOR_HIDE_DELAY,
@@ -36,6 +38,35 @@ const TEXT_PREVIEW_EXTENSIONS = ['.txt', '.md', '.markdown', '.text', '.log', '.
 
 export default class GlasslightExtension extends Extension {
     enable() {
+        this._started = false;
+        this._dependencyIdle = 0;
+        this._dependencySignal = Main.extensionManager.connect('extension-state-changed', () =>
+            this._syncDependencies());
+        this._startupDependencySignal = Main.layoutManager.connect('startup-complete', () => {
+            this._dependencyIdle = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                this._dependencyIdle = 0;
+                this._syncDependencies();
+                return GLib.SOURCE_REMOVE;
+            });
+        });
+        this._syncDependencies();
+    }
+
+    _syncDependencies() {
+        const ready = ['blur-my-shell@aunetx', 'lintel@topbar', 'erhai-motion@erhai.local']
+            .every(uuid => Main.extensionManager.lookup(uuid)?.state === 1)
+            && global.blur_my_shell?._popup?.enabled
+            && Main.extensionManager.lookup('erhai-motion@erhai.local')?.stateObj?.ready;
+        if (ready && !this._started) {
+            this._started = true;
+            this._start();
+        } else if (!ready && this._started) {
+            this._started = false;
+            this._stop();
+        }
+    }
+
+    _start() {
         this._alive = true;
         this._generation = (this._generation ?? 0) + 1;
         this._settings = this.getSettings('org.gnome.shell.extensions.glasslight');
@@ -79,6 +110,7 @@ export default class GlasslightExtension extends Extension {
         this._notifications = new Gio.Settings({schema_id: 'org.gnome.desktop.notifications'});
         this._refreshApps();
         this._build();
+        this._folders = new FolderLibrary(this);
         this._connect(this._interface, 'changed::color-scheme', () => this._applyTheme());
         this._connect(this._interface, 'changed::enable-animations', () => {
             if (!this._motionEnabled()) this._finishMotion();
@@ -96,6 +128,16 @@ export default class GlasslightExtension extends Extension {
             if (this._overlay.visible && this._mode === 'clipboard') this._readClipboard();
         });
         this._connect(Main.layoutManager, 'monitors-changed', () => { if (this._overlay.visible) this._position(); });
+        this._connect(global.display, 'workareas-changed', () => {
+            if (this._overlay.visible) this._scheduleLayout(false);
+        });
+        this._connect(Main.keyboard, 'visibility-changed', () => {
+            if (this._overlay.visible) this._scheduleLayout(false);
+        });
+        for (const property of ['visible', 'height', 'translation-y'])
+            this._connect(Main.layoutManager.keyboardBox, `notify::${property}`, () => {
+                if (this._overlay.visible) this._scheduleLayout(false);
+            });
         this._connect(St.ThemeContext.get_for_stage(global.stage), 'notify::scale-factor', () => {
             this._applyTheme();
             if (this._overlay.visible) this._position();
@@ -148,7 +190,24 @@ export default class GlasslightExtension extends Extension {
         if (this._appGridReplaced || !controls) return;
         this._appGridReplaced = true;
         const proto = Object.getPrototypeOf(controls);
-        const openApps = () => this._show('apps');
+        const owner = this;
+        const openApps = () => {
+            if (this._redirectingAppGrid)
+                return;
+            this._redirectingAppGrid = true;
+            try {
+                this._show('apps');
+                controls.dash.showAppsButton.checked = false;
+            } finally {
+                this._redirectingAppGrid = false;
+            }
+        };
+        this._originalOverviewShow = Main.overview.show;
+        Main.overview.show = function (state, ...args) {
+            if (state === ControlsState.APP_GRID)
+                return openApps();
+            return owner._originalOverviewShow.call(this, state, ...args);
+        };
         controls._onShowAppsButtonToggled = function () {
             const button = this.dash.showAppsButton;
             if (this._ignoreShowAppsButtonToggle || !button.checked) {
@@ -203,6 +262,8 @@ export default class GlasslightExtension extends Extension {
             delete this._origAdjustmentUpper;
         }
         delete Main.overview.showApps;
+        Main.overview.show = this._originalOverviewShow;
+        this._originalOverviewShow = null;
         // Re-register the stock binding exactly as OverviewControls does.
         Main.wm.removeKeybinding('toggle-application-view');
         Main.wm.addKeybinding('toggle-application-view', new Gio.Settings({schema_id: 'org.gnome.shell.keybindings'}),
@@ -211,6 +272,24 @@ export default class GlasslightExtension extends Extension {
     }
 
     disable() {
+        if (this._dependencyIdle)
+            GLib.source_remove(this._dependencyIdle);
+        this._dependencyIdle = 0;
+        if (this._dependencySignal)
+            Main.extensionManager.disconnect(this._dependencySignal);
+        this._dependencySignal = 0;
+        if (this._startupDependencySignal)
+            Main.layoutManager.disconnect(this._startupDependencySignal);
+        this._startupDependencySignal = 0;
+        if (this._started) {
+            this._started = false;
+            this._stop();
+        }
+    }
+
+    _stop() {
+        this._folders?.destroy();
+        this._folders = null;
         this._alive = false;
         this._generation++;
         this._previewCancel?.cancel();
@@ -267,15 +346,14 @@ export default class GlasslightExtension extends Extension {
         this._group = new St.Widget({style_class: 'glasslight-launcher',
             layout_manager: new Clutter.FixedLayout(), y_align: Clutter.ActorAlign.START});
         this._group.set_pivot_point(0.5, 0.0);
-        const column = new St.BoxLayout({vertical: true, style_class: 'glasslight-column'});
+        const column = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: 'glasslight-column'});
         this._searchRow = new St.BoxLayout({style_class: 'glasslight-search-row'});
         this._backButton = this._toolButton('go-previous-symbolic', _('Back to Glasslight'), () => {
             if (this._actionSession) {
                 this._cancelActionSession();
                 return;
             }
-            this._entry.set_text('');
-            this._setMode('all');
+            this._back();
         });
         this._searchRow.add_child(this._backButton);
         this._searchIcon = new St.Icon({icon_name: 'system-search-symbolic', icon_size: 24,
@@ -284,12 +362,20 @@ export default class GlasslightExtension extends Extension {
         this._entry = new St.Entry({hint_text: _('Glasslight Search'), style_class: 'glasslight-entry',
             can_focus: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this._searchRow.add_child(this._entry);
+        this._clearSearch = this._toolButton('edit-clear-symbolic', '清除搜索', () => {
+            this._entry.set_text('');
+            this._render();
+            this._entry.clutter_text.grab_key_focus();
+        });
+        this._searchRow.add_child(this._clearSearch);
+        this._closeApps = this._toolButton('window-close-symbolic', '关闭启动台', () => this._hide());
+        this._searchRow.add_child(this._closeApps);
         // Right-aligned keyboard hint that appears while a mode chip is hovered.
         this._searchShortcut = new St.Label({style_class: 'glasslight-search-shortcut', visible: false,
             y_align: Clutter.ActorAlign.CENTER});
         this._searchRow.add_child(this._searchShortcut);
         column.add_child(this._searchRow);
-        this._details = new St.BoxLayout({vertical: true, style_class: 'glasslight-details', visible: false});
+        this._details = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: 'glasslight-details', visible: false});
         const heading = new St.BoxLayout({style_class: 'glasslight-heading'});
         this._normalHeading = heading;
         this._heading = label('', 'glasslight-section');
@@ -307,7 +393,7 @@ export default class GlasslightExtension extends Extension {
         heading.add_child(this._clearButton);
         this._details.add_child(heading);
         this._buildAppControls();
-        this._list = new St.BoxLayout({vertical: true, style_class: 'glasslight-list'});
+        this._list = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: 'glasslight-list'});
         this._scroll = new St.ScrollView({style_class: 'glasslight-scroll', overlay_scrollbars: true,
             hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC});
         this._scroll.set_child(this._list);
@@ -360,7 +446,7 @@ export default class GlasslightExtension extends Extension {
         // dismissed by clicking outside the card.
         this._preview = new St.Widget({style_class: 'glasslight-preview-layer', visible: false,
             reactive: true, layout_manager: new Clutter.BinLayout()});
-        this._previewCard = new St.BoxLayout({vertical: true, style_class: 'glasslight-preview-card',
+        this._previewCard = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: 'glasslight-preview-card',
             x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER});
         this._preview.add_child(this._previewCard);
         this._preview.connect('button-press-event', () => {
@@ -374,21 +460,34 @@ export default class GlasslightExtension extends Extension {
             this._queueSearch();
         });
         this._entry.connect('button-press-event', () => {
+            this._entry.input_hints = Clutter.InputContentHintFlags.NONE;
             this._appNavigating = false;
             return Clutter.EVENT_PROPAGATE;
         });
-        // Handle navigation before ClutterText consumes Enter/arrow keys.
-        this._overlay.connect('captured-event', (_actor, event) =>
-            event.type() === Clutter.EventType.KEY_PRESS ? this._key(event) : Clutter.EVENT_PROPAGATE);
-        this._overlay.connect('button-press-event', (_actor, event) => {
+        this._entry.connect('touch-event', (_actor, event) => {
+            if (event.type() === Clutter.EventType.TOUCH_BEGIN) {
+                this._entry.input_hints = Clutter.InputContentHintFlags.NONE;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        const dismissOutside = (_actor, event) => {
+            if (event.type() === Clutter.EventType.KEY_PRESS)
+                return this._key(event);
+            if (event.type() !== Clutter.EventType.BUTTON_PRESS &&
+                event.type() !== Clutter.EventType.TOUCH_BEGIN)
+                return Clutter.EVENT_PROPAGATE;
+            if (this._folders.dragging)
+                return Clutter.EVENT_PROPAGATE;
             const [x, y] = event.get_coords();
             const [gx, gy] = this._group.get_transformed_position();
-            if (x < gx || x >= gx + this._group.width || y < gy || y >= gy + this._group.height) {
+            const [width, height] = this._group.get_transformed_size();
+            if (x < gx || x >= gx + width || y < gy || y >= gy + height) {
                 this._hide();
                 return Clutter.EVENT_STOP;
             }
             return Clutter.EVENT_PROPAGATE;
-        });
+        };
+        this._overlay.connect('captured-event', dismissOutside);
     }
 
     _refreshApps() {
@@ -446,8 +545,9 @@ export default class GlasslightExtension extends Extension {
             button.connect('clicked', () => {
                 this._appView = id;
                 this._settings.set_string('apps-view', id);
+                this._viewOptions.hide();
                 this._render();
-                button.grab_key_focus();
+                this._viewButton.grab_key_focus();
             });
             this._viewButtons.set(id, button);
             this._viewOptions.add_child(button);
@@ -498,12 +598,17 @@ export default class GlasslightExtension extends Extension {
         }
         for (const [id, button] of this._categoryButtons) button.checked = id === this._appCategory;
         for (const [id, button] of this._viewButtons) button.checked = id === this._appView;
+        this._appToolbar.visible = !this._folders.moving &&
+            (!this._folders.openId || Boolean(query));
+        this._viewOptions.visible &&= this._appToolbar.visible;
         const width = this._catalogWidth ?? 708;
         this._appColumns = this._appView === 'grid'
             ? Math.max(2, Math.min(APP_GRID_MAX_COLUMNS,
                 Math.floor((width - APP_GRID_HORIZONTAL_INSET) / APP_GRID_MIN_CELL_WIDTH)))
             : 1;
         const favorites = AppFavorites.getAppFavorites().getFavorites().map(app => app.get_id());
+        if (this._folders.render(query))
+            return;
         const used = Shell.AppUsage.get_default().get_most_used().map(app => app.get_id());
         const {suggestions, items, total} = catalogue(this._catalog, this._appCategory, query, [...favorites, ...used], this._appColumns === 1 ? 6 : this._appColumns);
         this._appVisualRow = 0;
@@ -513,11 +618,12 @@ export default class GlasslightExtension extends Extension {
         if (items.length) this._appendAppSection(title, items);
         if (!total) this._list.add_child(label(query ? _('No applications found in this category') : _('No applications available'), 'glasslight-empty'));
         const count = format(ngettext('%d app', '%d apps', total), total);
-        this._status.text = format(_('%s  ·  ↑ ↓ ← → select  ·  ↵ open  ·  Alt+←/→ categories'), count);
+        this._status.text = count;
     }
 
     _appendAppSection(title, items) {
-        this._list.add_child(label(title, 'glasslight-app-section glasslight-section'));
+        if (title)
+            this._list.add_child(label(title, 'glasslight-app-section glasslight-section'));
         const grid = this._appView === 'grid';
         const columns = this._appColumns;
         const cellWidth = Math.floor(((this._catalogWidth ?? 708) - APP_GRID_HORIZONTAL_INSET
@@ -525,7 +631,9 @@ export default class GlasslightExtension extends Extension {
         let line;
         items.forEach((item, offset) => {
             if (offset % columns === 0) {
-                line = new St.BoxLayout({style_class: 'glasslight-app-line', x_expand: true});
+                line = new St.BoxLayout({style_class: 'glasslight-app-line', x_expand: true,
+                    x_align: grid && this._folders.openId
+                        ? Clutter.ActorAlign.CENTER : Clutter.ActorAlign.FILL});
                 this._list.add_child(line);
                 this._appVisualRow++;
             }
@@ -533,13 +641,14 @@ export default class GlasslightExtension extends Extension {
                 style: grid ? `width: ${cellWidth}px;` : '', x_expand: !grid, can_focus: true,
                 track_hover: true, accessible_name: `${item.title}, ${item.detail}`,
                 x_align: Clutter.ActorAlign.FILL});
-            const content = new St.BoxLayout({vertical: grid, style_class: grid ? 'glasslight-app-tile-content' : 'glasslight-result-row',
+            const content = new St.BoxLayout({orientation: grid ? Clutter.Orientation.VERTICAL : Clutter.Orientation.HORIZONTAL, style_class: grid ? 'glasslight-app-tile-content' : 'glasslight-result-row',
                 x_expand: true, x_align: Clutter.ActorAlign.FILL});
-            const appIcon = icon(item.gicon);
-            appIcon.icon_size = grid ? APP_GRID_ICON_SIZE : 34;
+            const appIcon = item.folder ? this._folders.preview(item) : icon(item.gicon);
+            if (!item.folder)
+                appIcon.icon_size = grid ? APP_GRID_ICON_SIZE : 34;
             appIcon.x_align = grid ? Clutter.ActorAlign.CENTER : Clutter.ActorAlign.START;
             content.add_child(appIcon);
-            const texts = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+            const texts = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
             const name = label(item.title, grid ? 'glasslight-app-name' : 'glasslight-title');
             if (grid) {
                 name.x_align = Clutter.ActorAlign.CENTER;
@@ -548,9 +657,16 @@ export default class GlasslightExtension extends Extension {
             texts.add_child(name);
             if (!grid) texts.add_child(label(item.detail, 'glasslight-subtitle'));
             content.add_child(texts);
+            const selectionMark = this._folders.editing && !item.folder && !this._folders.moving
+                ? new St.Icon({icon_name: 'object-select-symbolic', icon_size: 16,
+                    opacity: this._folders.selected.has(item.id) ? 255 : 0,
+                    style_class: 'glasslight-selection-mark', accessible_name: '已选择'}) : null;
+            if (selectionMark)
+                content.add_child(selectionMark);
             button.set_child(content);
             const index = this._rows.length;
-            button.connect('clicked', () => this._activate(item.activate));
+            button.connect('clicked', () => this._folders.activate(item, button));
+            this._folders.bind(button, item, appIcon);
             button.connect('notify::hover', () => {if (button.hover) this._select(index, false);});
             button.connect('key-focus-in', () => this._select(index));
             button.connect('notify::allocation', () => {
@@ -558,7 +674,7 @@ export default class GlasslightExtension extends Extension {
                     this._select(index);
             });
             line.add_child(button);
-            this._rows.push({button, item, appIcon, name,
+            this._rows.push({button, item, appIcon, name, selectionMark,
                 visualRow: this._appVisualRow, column: offset % columns});
         });
     }
@@ -575,16 +691,30 @@ export default class GlasslightExtension extends Extension {
         const focus = global.stage.get_key_focus();
         const entry = focus === this._entry.clutter_text;
         const focusedRow = this._rows.findIndex(row => row.button === focus);
+        if (key === Clutter.KEY_F2 && this._folders.openId && !this._folders.moving) {
+            this._folders.editing = true;
+            this._render();
+            this._folders.name.clutter_text.grab_key_focus();
+            this._folders.name.clutter_text.set_selection(0, -1);
+            return true;
+        }
+        if ((state & Clutter.ModifierType.CONTROL_MASK) && key === Clutter.KEY_a &&
+            focusedRow >= 0 && this._folders.editing && !this._folders.moving) {
+            this._folders.selectAll.emit('clicked', 1);
+            return true;
+        }
         if ((state & Clutter.ModifierType.MOD1_MASK) && (key === Clutter.KEY_Left || key === Clutter.KEY_Right)) {
             this._cycleCategory(key === Clutter.KEY_Left ? -1 : 1);
             return true;
         }
         if (key === Clutter.KEY_Tab || key === Clutter.KEY_ISO_Left_Tab) {
             // One roving result tab stop, not hundreds of app icons.
-            const stops = [this._entry.clutter_text, this._backButton, this._categoryPrevious,
+            const stops = [this._entry.clutter_text, this._backButton, this._clearSearch,
+                this._closeApps, this._categoryPrevious,
                 ...this._categoryButtons.values(), this._categoryNext, this._viewButton,
                 ...(this._viewOptions.visible ? [...this._viewButtons.values()] : []),
-                this._rows[this._selected]?.button].filter(Boolean);
+                ...this._folders.focusStops(),
+                this._rows[this._selected]?.button].filter(actor => actor?.mapped && actor.reactive);
             const delta = key === Clutter.KEY_ISO_Left_Tab || (state & Clutter.ModifierType.SHIFT_MASK) ? -1 : 1;
             stops[(stops.indexOf(focus) + delta + stops.length) % stops.length].grab_key_focus();
             return true;
@@ -610,6 +740,27 @@ export default class GlasslightExtension extends Extension {
         return false;
     }
 
+    _back() {
+        if (this._viewOptions.visible) {
+            this._viewOptions.hide();
+            this._viewButton.grab_key_focus();
+            this._scheduleLayout();
+        } else if (this._folders.moving) {
+            this._folders.escape();
+            this._folders.move.grab_key_focus();
+        } else if (this._entry.get_text()) {
+            this._entry.set_text('');
+            this._render();
+            this._entry.clutter_text.grab_key_focus();
+        } else if (this._folders.escape()) {
+            return;
+        } else if (this._appCategory !== 'all') {
+            this._chooseCategory('all');
+        } else {
+            this._hide();
+        }
+    }
+
     _applyTheme() {
         const choice = this._settings.get_string('appearance');
         const dark = choice === 'dark' || (choice === 'system' && this._interface.get_string('color-scheme') === 'prefer-dark');
@@ -623,7 +774,9 @@ export default class GlasslightExtension extends Extension {
     }
 
     _motionEnabled() {
-        return this._interface?.get_boolean('enable-animations') ?? true;
+        const settings = St.Settings.get();
+        return settings.enable_animations && settings.reduced_motion !== St.ReducedMotion.REDUCE &&
+            this._interface.get_boolean('enable-animations');
     }
 
     _scrollable() {
@@ -707,7 +860,7 @@ export default class GlasslightExtension extends Extension {
     }
 
     _scheduleLayout(animate = false) {
-        if (!this._alive || !this._overlay.visible) return;
+        if (!this._alive || !this._overlay.visible || this._closing) return;
         this._animateNextLayout ||= animate;
         if (this._layoutLater) return;
         this._layoutLater = global.compositor.get_laters().add(Meta.LaterType.BEFORE_REDRAW, () => {
@@ -737,12 +890,23 @@ export default class GlasslightExtension extends Extension {
             this._render();
             return;
         }
-        this._scroll.set_style(`max-height: ${Math.max(160, Math.min(390, monitor.height / scale - 220))}px;`);
+        const workArea = Main.layoutManager.getWorkAreaForMonitor(this._monitorIndex >= 0
+            ? this._monitorIndex : Main.layoutManager.primaryIndex);
+        const keyboard = Main.layoutManager.keyboardBox;
+        const [, keyboardY] = keyboard.get_transformed_position();
+        const bottom = Main.keyboard.visible && Main.layoutManager.keyboardIndex === this._monitorIndex
+            ? Math.max(workArea.y, keyboardY - keyboard.height) : workArea.y + workArea.height;
+        const availableHeight = bottom - workArea.y - 24 * scale;
+        this._scroll.set_style('max-height: 0px;');
+        const chromeHeight = this._mainSurface.naturalHeight(targetWidth);
+        this._scroll.set_style(`max-height: ${Math.max(0,
+            Math.min(390, (availableHeight - chromeHeight) / scale))}px;`);
         const targetHeight = this._mainSurface.naturalHeight(targetWidth);
         const groupHeight = Math.max(62, targetHeight);
         this._group.set_size(expandedWidth, groupHeight);
         this._group.set_position(Math.round(monitor.x + (monitor.width - expandedWidth) / 2),
-            Math.round(monitor.y + Math.max(24 * scale, Math.min(monitor.height * 0.26, monitor.height - groupHeight - 32 * scale))));
+            Math.round(workArea.y + Math.max(12 * scale,
+                Math.min(workArea.height * 0.26, bottom - workArea.y - groupHeight - 12 * scale))));
         this._mainSurface.set_position(0, 0);
         this._modeBar.set_position(compactWidth + 14, 0);
         const duration = animate ? this._duration(MOTION.morph) : 0;
@@ -767,6 +931,7 @@ export default class GlasslightExtension extends Extension {
 
     _show(mode = 'all') {
         if (!this._alive || (this._overlay.visible && !this._closing)) return;
+        const reversing = this._closing;
         Main.overview.hide();
         const serial = ++this._animationSerial;
         this._closing = false;
@@ -774,7 +939,8 @@ export default class GlasslightExtension extends Extension {
         this._monitorIndex = Main.layoutManager.monitors.findIndex(m => x >= m.x && x < m.x + m.width && y >= m.y && y < m.y + m.height);
         this._overlay.reactive = true;
         this._overlay.show();
-        if (!this._grab) this._grab = Main.pushModal(this._overlay, {actionMode: Shell.ActionMode.POPUP});
+        // Shell候选窗和屏幕键盘与启动台共享uiGroup，保留其原生输入事件。
+        if (!this._grab) this._grab = Main.pushModal(Main.uiGroup, {actionMode: Shell.ActionMode.POPUP});
         this._renderedExpanded = null;
         this._renderedMode = null;
         this._mode = 'all';
@@ -789,15 +955,21 @@ export default class GlasslightExtension extends Extension {
             this._finishMotion();
             return;
         }
-        this._group.opacity = 0;
-        this._group.scale_x = 0.965;
-        this._group.scale_y = 0.965;
-        this._group.translation_y = -6;
-        for (const [index, surface] of this._surfaces.entries())
-            surface.materialize(duration, Math.min(index * 12, 48));
-        this._group.ease({opacity: 255, scale_x: 1, scale_y: 1, translation_y: 0,
-            duration, mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
-            onComplete: () => {if (serial === this._animationSerial && !this._closing) this._finishMotion();}});
+        if (!reversing) {
+            this._group.opacity = 0;
+            this._group.scale_x = 0.94;
+            this._group.scale_y = 0.94;
+            this._group.translation_y = 12;
+        }
+        for (const [index, surface] of this._surfaces.entries()) {
+            if (reversing)
+                animate(surface, {opacity: 255}, duration);
+            else
+                surface.materialize(duration, Math.min(index * 12, 48));
+        }
+        this._group.set_pivot_point(0.5, 0.5);
+        animate(this._group, {opacity: 255, scale_x: 1, scale_y: 1, translation_y: 0}, duration,
+            () => {if (serial === this._animationSerial && !this._closing) this._finishMotion();});
     }
 
     _hide(immediate = false) {
@@ -810,6 +982,7 @@ export default class GlasslightExtension extends Extension {
         if (!this._overlay?.visible) return;
         const serial = ++this._animationSerial;
         this._closing = true;
+        Main.keyboard.close();
         this._overlay.reactive = false;
         this._group.remove_all_transitions();
         const duration = immediate ? 0 : this._duration(MOTION.close);
@@ -819,14 +992,13 @@ export default class GlasslightExtension extends Extension {
             return;
         }
         for (const surface of this._surfaces) surface.dematerialize(duration);
-        this._group.ease({opacity: 0, scale_x: 0.972, scale_y: 0.972, translation_y: -4,
-            duration, mode: Clutter.AnimationMode.EASE_IN_QUAD,
-            onComplete: () => {
+        animate(this._group, {opacity: 0, scale_x: 0.94, scale_y: 0.94, translation_y: 8}, duration,
+            () => {
                 if (serial !== this._animationSerial) return;
                 this._overlay.hide();
                 this._closing = false;
                 this._finishMotion();
-            }});
+            });
     }
 
     _finishMotion() {
@@ -914,6 +1086,12 @@ export default class GlasslightExtension extends Extension {
     }
 
     _setMode(mode) {
+        this._entry.input_hints = mode === 'apps'
+            ? Clutter.InputContentHintFlags.INHIBIT_OSK : Clutter.InputContentHintFlags.NONE;
+        if (this._folders && mode !== 'apps')
+            this._folders.bar.hide();
+        if (this._folders && mode !== 'apps')
+            this._folders.footer.hide();
         if (this._actionSession) this._actionSession = null;
         if (mode !== this._mode) this._appCategory = 'all';
         this._mode = mode;
@@ -942,6 +1120,9 @@ export default class GlasslightExtension extends Extension {
     _key(event) {
         const key = event.get_key_symbol();
         const state = event.get_state();
+        const candidates = Main.extensionManager.lookup('kimpanel@kde.org')?.stateObj?.kimpanel;
+        if (Main.inputMethod.hasPreedit() || candidates?.showLookupTable)
+            return Clutter.EVENT_PROPAGATE;
         // While a preview is open, keys drive the preview, not the search entry.
         if (this._previewOpen) {
             if (key === Clutter.KEY_Escape || key === Clutter.KEY_space || key === Clutter.KEY_KP_Space) {
@@ -973,6 +1154,10 @@ export default class GlasslightExtension extends Extension {
             return Clutter.EVENT_STOP;
         }
         if (key === Clutter.KEY_Escape) {
+            if (this._mode === 'apps') {
+                this._back();
+                return Clutter.EVENT_STOP;
+            }
             if (this._mode !== 'all') {
                 this._entry.set_text('');
                 this._setMode('all');
@@ -1279,6 +1464,13 @@ export default class GlasslightExtension extends Extension {
 
     _render() {
         if (!this._alive) return;
+        if (this._folders?.dragging || this._folders?.pressed.size) {
+            this._folders.pendingRender = true;
+            return;
+        }
+        if (this._searchTimer)
+            GLib.source_remove(this._searchTimer);
+        this._searchTimer = 0;
         const focusedApp = this._mode === 'apps'
             ? this._rows.find(row => row.button === global.stage.get_key_focus())?.item.id : null;
         const query = fold(this._entry.get_text().trim());
@@ -1286,6 +1478,9 @@ export default class GlasslightExtension extends Extension {
         const expanded = this._mode !== 'all' || typing;
         const previousExpanded = this._renderedExpanded;
         const modeChanged = this._renderedMode !== null && this._renderedMode !== this._mode;
+        const folderChanged = this._mode === 'apps' && this._renderedMode === 'apps' &&
+            this._renderedFolder !== this._folders.openId;
+        this._renderedFolder = this._folders?.openId ?? null;
         this._renderedExpanded = expanded;
         this._renderedMode = this._mode;
         this._list.destroy_all_children();
@@ -1294,13 +1489,19 @@ export default class GlasslightExtension extends Extension {
         this._details.visible = expanded;
         const apps = this._mode === 'apps';
         this._backButton.visible = apps || !!this._actionSession;
+        this._backButton.accessible_name = apps ? '返回' : _('Back to Glasslight');
+        this._clearSearch.visible = apps && typing;
+        this._closeApps.visible = apps;
         this._appToolbar.visible = apps;
         this._normalHeading.visible = !apps;
         if (!apps) this._viewOptions.hide();
         this._clearButton.visible = this._mode === 'clipboard' && this._clips.length > 0;
         const modeName = MODES.find(m => m.id === this._mode)?.name;
         this._heading.text = this._actionSession?.action.title ?? (modeName ? _(modeName) : _('Best matches'));
-        if (apps) this._renderApps(query);
+        if (apps) {
+            this._renderApps(query);
+            this._folders.syncSelection();
+        }
         else if (expanded) {
             const items = this._items(query);
             for (const item of items) {
@@ -1317,7 +1518,7 @@ export default class GlasslightExtension extends Extension {
                         style: `width: ${item.thumbnailWidth}px; height: ${item.thumbnailHeight}px;`}));
                     row.add_child(preview);
                 } else row.add_child(icon(item.gicon, item.fallback));
-                const texts = new St.BoxLayout({vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+                const texts = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
                 texts.add_child(label(item.title, 'glasslight-title'));
                 texts.add_child(label(item.detail, 'glasslight-subtitle'));
                 row.add_child(texts);
@@ -1352,7 +1553,20 @@ export default class GlasslightExtension extends Extension {
             } else this._entry.clutter_text.grab_key_focus();
         }
         this._animateState(previousExpanded, expanded, modeChanged);
-        this._scheduleLayout(previousExpanded !== null && previousExpanded !== expanded);
+        if (folderChanged) {
+            const reversingFolder = Boolean(this._list.get_transition('scale-x'));
+            this._list.remove_all_transitions();
+            this._list.set_pivot_point(0.5, 0.25);
+            if (!reversingFolder) {
+                this._list.opacity = 0;
+                this._list.set_scale(this._folders.openId ? 0.90 : 1.06,
+                    this._folders.openId ? 0.90 : 1.06);
+                this._list.translation_y = this._folders.openId ? 14 : -10;
+            }
+            animate(this._list, {opacity: 255, scale_x: 1, scale_y: 1, translation_y: 0},
+                this._duration(MOTION.folder));
+        }
+        this._scheduleLayout(folderChanged || (previousExpanded !== null && previousExpanded !== expanded));
     }
 
     _select(index, scroll = true) {
