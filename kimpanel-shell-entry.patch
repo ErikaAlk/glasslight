@@ -1,0 +1,24 @@
+--- panel.js
++++ panel.js
+@@ -199,7 +199,9 @@
+         let w = kimpanel.w;
+         let h = kimpanel.h;
+         let rect;
+-        const focusWindow = global.display.focus_window;
++        // Shell输入框已经提供舞台坐标，不经过背后应用窗口的缩放转换。
++        const focusWindow = global.stage.get_key_focus() instanceof Clutter.Text
++            ? null : global.display.focus_window;
+         if (kimpanel.relative && focusWindow) {
+             let shellScale =
+                 St.ThemeContext.get_for_stage(global.stage).scale_factor;
+@@ -232,8 +234,8 @@
+ 
+         x = rect.x;
+         y = rect.y;
+-        w = rect.w;
+-        h = rect.h;
++        w = rect.width;
++        h = rect.height;
+ 
+         let panel_height = this.panel.get_height();
+ 

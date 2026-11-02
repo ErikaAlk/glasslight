@@ -1,0 +1,37 @@
+--- panel.js
++++ panel.js
+@@ -122,11 +122,12 @@
+                 item.add_style_class_name('kimpanel-candidate-item');
+                 item.candidate_index = 0;
+                 item.ignore_focus = true;
+-                item._buttonReleaseId =
+-                    item.connect('button-release-event', (widget) => {
+-                        if (!widget.ignore_focus)
+-                            this._candidateClicked(widget);
+-                    });
++                const candidateClick = new Clutter.ClickGesture();
++                candidateClick.connect('may-recognize', () => !item.ignore_focus);
++                candidateClick.connect('recognize', () => {
++                    this._candidateClicked(item);
++                });
++                item.add_action(candidateClick);
+                 item._enterEventId = item.connect('enter-event', (widget) => {
+                     if (!widget.ignore_focus)
+                         widget.add_style_pseudo_class('hover');
+@@ -135,7 +136,6 @@
+                         widget.remove_style_pseudo_class('hover');
+                 });
+                 item._labelDestroyId = item.connect('destroy', () => {
+-                    item.disconnect(item._buttonReleaseId);
+                     item.disconnect(item._enterEventId);
+                     item.disconnect(item._leaveEventId);
+                     item.disconnect(item._labelDestroyId);
+@@ -153,7 +153,7 @@
+         // update label and text
+         let lookupTable = this.lookupTableLayout.get_children();
+         for (let i = 0; i < lookupTable.length; i++) {
+-            if (label[i].length == 0)
++            if (table[i].length == 0)
+                 lookupTable[i].ignore_focus = true;
+             else
+                 lookupTable[i].ignore_focus = false;

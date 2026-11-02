@@ -22,8 +22,9 @@ export const APP_GRID_ICON_SIZE = 54;
 export const APP_GRID_GAP = 4;
 export const APP_GRID_HORIZONTAL_INSET = 32;
 export const MOTION = Object.freeze({
-    open: 180,
-    close: 135,
+    open: 320,
+    close: 230,
+    folder: 280,
     morph: 250,
     modes: 165,
     content: 155,

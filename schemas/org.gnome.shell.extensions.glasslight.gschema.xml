@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist gettext-domain="glasslight">
   <schema id="org.gnome.shell.extensions.glasslight" path="/org/gnome/shell/extensions/glasslight/">
+    <key name="app-folders" type="a(ssas)">
+      <default>[]</default>
+      <summary>应用文件夹</summary>
+      <description>本地保存的文件夹标识、名称和应用desktop标识；解散文件夹保留应用。</description>
+    </key>
     <key name="apps-view" type="s">
       <choices><choice value="grid"/><choice value="list"/></choices>
       <default>'grid'</default>
@@ -17,7 +22,7 @@
       <summary>Native background blur radius</summary>
     </key>
     <key name="remember-clipboard" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Keep up to 20 text and image clipboard entries in memory</summary>
     </key>
     <key name="search-engine" type="s">
@@ -35,12 +40,12 @@
       <description>An http or https URL where %s is replaced by the query. Used when search-engine is custom.</description>
     </key>
     <key name="replace-app-grid" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Replace the GNOME app grid</summary>
       <description>Open the Glasslight application catalogue instead of the GNOME Shell app grid from Super+A, the Show Apps button and a second Super press.</description>
     </key>
     <key name="toggle-glasslight" type="as">
-      <default>['&lt;Alt&gt;space']</default>
+      <default>['&lt;Control&gt;&lt;Alt&gt;space']</default>
       <summary>Toggle Glasslight</summary>
       <description>The keyboard shortcut used to show or hide the launcher.</description>
     </key>

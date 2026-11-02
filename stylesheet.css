@@ -1,18 +1,24 @@
 /* Background colours are neutral tints OVER the real blurred window sample. */
-.glasslight-root { background-color: transparent; font-family: sans-serif; }
+.glasslight-root { background-color: transparent; font-family: "OPPO Sans 4.0"; }
 .glasslight-light { color: #252526; }
 .glasslight-dark { color: #f3f3f4; }
 .glasslight-launcher { spacing: 14px; }
 .glasslight-column { padding: 0; }
 .glasslight-glass { background-color: transparent; }
+.glasslight-glass.bms-popup-liquid-glass {
+    -erhai-background-color: rgba(20,24,30,0.28);
+    -erhai-border-color: rgba(255,255,255,0.24);
+    border: 1px solid transparent;
+    color: rgba(255,255,255,0.98);
+}
 .glasslight-glass-tint { border: 1px solid; box-shadow: 0 4px 10px 0 rgba(0,0,0,0.16); }
 .glasslight-glass-highlight { border: 1px solid rgba(255,255,255,0.72); background-color: rgba(255,255,255,0.035); }
 .glasslight-light .glasslight-glass-tint { background-color: rgba(247,247,247,0.62); border-color: rgba(255,255,255,0.76); }
 .glasslight-dark .glasslight-glass-tint { background-color: rgba(24,24,26,0.68); border-color: rgba(255,255,255,0.23); box-shadow: 0 5px 12px 0 rgba(0,0,0,0.22); }
 .glasslight-dark .glasslight-glass-highlight { border-color: rgba(255,255,255,0.42); background-color: rgba(255,255,255,0.025); }
-.glasslight-search-row { height: 62px; padding: 0 20px; spacing: 13px; }
+.glasslight-search-row { height: 62px; padding: 0 12px; spacing: 8px; }
 .glasslight-search-icon { color: inherit; opacity: 0.7; }
-.glasslight-entry { padding: 0; border: 0; border-radius: 0; background-color: transparent; color: inherit; box-shadow: none; font-size: 21px; caret-color: #0a84ff; }
+.glasslight-entry { padding: 0; border: 0; border-radius: 0; background-color: transparent; color: inherit; box-shadow: none; font-size: 18px; caret-color: #0a84ff; }
 .glasslight-entry:focus { border: 0; background-color: transparent; box-shadow: none; }
 .glasslight-light .glasslight-entry StLabel { color: rgba(30,30,30,0.46); }
 .glasslight-dark .glasslight-entry StLabel { color: rgba(255,255,255,0.50); }
@@ -82,10 +88,10 @@
 .glasslight-preview-text-body { width: 620px; font-family: monospace; font-size: 12px; }
 .glasslight-light .glasslight-preview-text-body { color: rgba(30,30,32,0.92); }
 .glasslight-dark .glasslight-preview-text-body { color: rgba(245,245,247,0.9); }
-.glasslight-app-toolbar { spacing: 4px; padding: 6px 4px; border-top: 1px solid rgba(128,128,128,0.2); }
+.glasslight-app-toolbar { spacing: 4px; padding: 4px; }
 .glasslight-categories { spacing: 4px; }
-.glasslight-tool { padding: 7px; border: 0; border-radius: 15px; color: inherit; background-color: transparent; }
-.glasslight-category { padding: 7px 10px; border: 0; border-radius: 14px; font-size: 11px; color: inherit; background-color: transparent; }
+.glasslight-tool { min-width: 32px; min-height: 32px; padding: 6px; border: 0; border-radius: 22px; color: inherit; background-color: transparent; }
+.glasslight-category { min-height: 28px; padding: 8px 10px; border: 0; border-radius: 22px; font-size: 12px; color: inherit; background-color: transparent; }
 .glasslight-view-options { spacing: 6px; padding: 4px 10px 8px; }
 .glasslight-view-choice { padding: 6px 10px; border: 0; border-radius: 9px; background-color: transparent; color: inherit; }
 .glasslight-view-choice-content { spacing: 7px; }
@@ -100,5 +106,20 @@
 .glasslight-app-name { font-size: 12px; font-weight: 400; }
 .glasslight-search-icon-hint { opacity: 1; }
 .glasslight-search-shortcut { font-size: 13px; font-weight: 600; padding: 3px 9px; border-radius: 7px; }
+.glasslight-folder-toolbar { spacing: 8px; padding: 4px 8px 8px; }
+.glasslight-folder-toolbar-row { spacing: 6px; }
+.glasslight-library-title { font-size: 16px; font-weight: 600; }
+.glasslight-selection-toolbar { spacing: 4px; padding: 8px 4px 0; }
+.glasslight-selection-mark { color: inherit; }
+.glasslight-folder-action { color: inherit; background-color: transparent; border-radius: 16px; padding: 8px 12px; min-height: 28px; }
+.glasslight-folder-action:hover { background-color: rgba(128,128,128,0.16); }
+.glasslight-folder-action:focus { box-shadow: inset 0 0 0 2px #0a84ff; }
+.glasslight-folder-action:disabled { color: rgba(160,160,170,0.55); }
+.glasslight-app-tile:checked { box-shadow: inset 0 0 0 2px #0a84ff; }
+.glasslight-folder-name { color: inherit; background-color: rgba(128,128,128,0.12); border-radius: 12px; padding: 8px; min-width: 80px; }
+.glasslight-folder-preview { width: 46px; height: 46px; padding: 4px; border-radius: 14px; background-color: rgba(180,180,190,0.24); }
+.glasslight-folder-preview-grid { spacing: 2px; }
+.glasslight-folder-preview-line { spacing: 2px; min-height: 22px; }
+.glasslight-app-tile:checked { background-color: rgba(10,132,255,0.26); }
 .glasslight-light .glasslight-search-shortcut { background-color: rgba(0,0,0,0.08); color: rgba(28,28,30,0.66); }
 .glasslight-dark .glasslight-search-shortcut { background-color: rgba(255,255,255,0.14); color: rgba(243,243,244,0.78); }
